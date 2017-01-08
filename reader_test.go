@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"math/rand"
+	"net"
 	"testing"
 	"time"
 
@@ -145,4 +146,40 @@ func TestInterruptableReaderResume(t *testing.T) {
 
 func TestInterruptableReaderEOF(t *testing.T) {
 	t.Run("GoroutineReader", testInterruptableReaderEOF(newGoroutineReaderFn))
+}
+
+func TestInterruptableReaderTCP(t *testing.T) {
+	tcpRandServer := NewTCPRandServer(
+		randIntRange{min: 1, max: 100},
+		randIntRange{min: 1, max: 500},
+		randIntRange{min: 0, max: 10},
+	)
+	go tcpRandServer.AcceptOnce()
+	defer tcpRandServer.Close()
+
+	conn, err := net.Dial("tcp", tcpRandServer.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ir := newGoroutineReaderFn(conn)
+	dest := &bytes.Buffer{}
+	ctx, _ := context.WithTimeout(context.Background(), 25*time.Millisecond)
+
+	for {
+		r := ctxio.WithContext(ctx, ir)
+		_, err := dest.ReadFrom(r)
+		if err == nil {
+			break
+		} else if err == context.Canceled || err == context.DeadlineExceeded {
+			ctx, _ = context.WithTimeout(context.Background(), 25*time.Millisecond)
+		} else {
+			t.Fatal(err)
+		}
+	}
+
+	if bytes.Compare(tcpRandServer.SentBytes(), dest.Bytes()) != 0 {
+		t.Fatalf("source and dest bytes did not match: %v, %v", tcpRandServer.SentBytes(), dest.Bytes())
+	}
+
 }
