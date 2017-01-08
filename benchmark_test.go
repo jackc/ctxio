@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/jackc/ctxio"
 )
@@ -38,7 +39,7 @@ func BenchmarkGoroutineReaderTCPSource(b *testing.B) {
 	tcpRandServer := NewTCPRandServer(
 		randIntRange{min: b.N * 2, max: b.N*2 + 1},
 		randIntRange{min: 1, max: 500},
-		randIntRange{min: 0, max: 10},
+		randIntRange{min: 0, max: 0},
 	)
 	go tcpRandServer.AcceptOnce()
 	defer tcpRandServer.Close()
@@ -62,12 +63,71 @@ func BenchmarkGoroutineReaderTCPSource(b *testing.B) {
 	}
 }
 
+func BenchmarkDeadlineReaderCancelableTCPSource(b *testing.B) {
+	dest := make([]byte, 250)
+	tcpRandServer := NewTCPRandServer(
+		randIntRange{min: b.N * 2, max: b.N*2 + 1},
+		randIntRange{min: 1, max: 500},
+		randIntRange{min: 0, max: 0},
+	)
+	go tcpRandServer.AcceptOnce()
+	defer tcpRandServer.Close()
+
+	conn, err := net.Dial("tcp", tcpRandServer.Addr().String())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer conn.Close()
+
+	ir := ctxio.NewDeadlineReader(conn)
+	ctx, _ := context.WithTimeout(context.Background(), time.Minute)
+	r := ctxio.WithContext(ctx, ir)
+
+	for i := 0; i < b.N; i++ {
+		_, err := r.Read(dest)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		tcpRandServer.ReleaseSentBytes()
+	}
+}
+
+func BenchmarkDeadlineReaderUncancelableTCPSource(b *testing.B) {
+	dest := make([]byte, 250)
+	tcpRandServer := NewTCPRandServer(
+		randIntRange{min: b.N * 2, max: b.N*2 + 1},
+		randIntRange{min: 1, max: 500},
+		randIntRange{min: 0, max: 0},
+	)
+	go tcpRandServer.AcceptOnce()
+	defer tcpRandServer.Close()
+
+	conn, err := net.Dial("tcp", tcpRandServer.Addr().String())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer conn.Close()
+
+	ir := ctxio.NewDeadlineReader(conn)
+	r := ctxio.WithContext(context.Background(), ir)
+
+	for i := 0; i < b.N; i++ {
+		_, err := r.Read(dest)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		tcpRandServer.ReleaseSentBytes()
+	}
+}
+
 func BenchmarkNormalReaderTCPSource(b *testing.B) {
 	dest := make([]byte, 250)
 	tcpRandServer := NewTCPRandServer(
 		randIntRange{min: b.N * 2, max: b.N*2 + 1},
 		randIntRange{min: 1, max: 500},
-		randIntRange{min: 0, max: 10},
+		randIntRange{min: 0, max: 0},
 	)
 	go tcpRandServer.AcceptOnce()
 	defer tcpRandServer.Close()

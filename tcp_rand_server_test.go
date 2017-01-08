@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"math/rand"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -13,15 +14,20 @@ type randIntRange struct {
 }
 
 func (rir randIntRange) Pick() int {
+	if rir.min == rir.max {
+		return rir.min
+	}
 	return rir.min + rand.Intn(rir.max-rir.min)
 }
 
 type TCPRandServer struct {
 	ln          net.Listener
-	sentBuf     *bytes.Buffer
 	packetCount randIntRange
 	packetLen   randIntRange
 	packetDelay randIntRange
+
+	sentBufLock sync.Mutex
+	sentBuf     *bytes.Buffer
 }
 
 func NewTCPRandServer(packetCount, packetLen, packetDelay randIntRange) *TCPRandServer {
@@ -48,7 +54,9 @@ func (s *TCPRandServer) SentBytes() []byte {
 }
 
 func (s *TCPRandServer) ReleaseSentBytes() {
+	s.sentBufLock.Lock()
 	s.sentBuf.Reset()
+	s.sentBufLock.Unlock()
 }
 
 func (s *TCPRandServer) Close() error {
@@ -77,7 +85,10 @@ func (s *TCPRandServer) handleConn(conn net.Conn) {
 		packetLen := s.packetLen.Pick()
 
 		rand.Read(buf[:packetLen])
+
+		s.sentBufLock.Lock()
 		s.sentBuf.Write(buf[:packetLen])
+		s.sentBufLock.Unlock()
 
 		n, err := conn.Write(buf[:packetLen])
 		if n != packetLen {
