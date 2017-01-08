@@ -7,12 +7,17 @@ import (
 )
 
 type DeadlineReader struct {
-	r net.Conn
+	r               net.Conn
+	readDoneChan    chan struct{}
+	readDeadlineSet chan bool
 }
 
 func NewDeadlineReader(r net.Conn) *DeadlineReader {
-	dr := &DeadlineReader{r: r}
-	return dr
+	return &DeadlineReader{
+		r:               r,
+		readDoneChan:    make(chan struct{}),
+		readDeadlineSet: make(chan bool),
+	}
 }
 
 func (dr *DeadlineReader) ReadContext(ctx context.Context, p []byte) (n int, err error) {
@@ -30,26 +35,24 @@ func (dr *DeadlineReader) readContext(ctx context.Context, p []byte) (n int, err
 	default:
 	}
 
-	readDoneChan := make(chan struct{})
-	readDeadlineSet := make(chan bool)
-
 	go func() {
 		select {
 		case <-ctx.Done():
 			dr.r.SetReadDeadline(time.Now())
-			readDeadlineSet <- true
-		case <-readDoneChan:
-			readDeadlineSet <- false
+			<-dr.readDoneChan
+			dr.readDeadlineSet <- true
+		case <-dr.readDoneChan:
+			dr.readDeadlineSet <- false
 		}
 	}()
 
 	n, err = dr.r.Read(p)
 
 	// Cleanup cancelation goroutine
-	close(readDoneChan)
+	dr.readDoneChan <- struct{}{}
 
 	// Clear read deadline if set
-	if <-readDeadlineSet {
+	if <-dr.readDeadlineSet {
 		dr.r.SetReadDeadline(time.Time{})
 	}
 

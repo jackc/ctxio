@@ -26,11 +26,12 @@ type TCPRandServer struct {
 	packetLen   randIntRange
 	packetDelay randIntRange
 
+	saveBytes   bool
 	sentBufLock sync.Mutex
 	sentBuf     *bytes.Buffer
 }
 
-func NewTCPRandServer(packetCount, packetLen, packetDelay randIntRange) *TCPRandServer {
+func NewTCPRandServer(packetCount, packetLen, packetDelay randIntRange, saveBytes bool) *TCPRandServer {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		panic(err)
@@ -42,6 +43,7 @@ func NewTCPRandServer(packetCount, packetLen, packetDelay randIntRange) *TCPRand
 		packetCount: packetCount,
 		packetLen:   packetLen,
 		packetDelay: packetDelay,
+		saveBytes:   saveBytes,
 	}
 }
 
@@ -50,13 +52,11 @@ func (s *TCPRandServer) Addr() net.Addr {
 }
 
 func (s *TCPRandServer) SentBytes() []byte {
-	return s.sentBuf.Bytes()
-}
-
-func (s *TCPRandServer) ReleaseSentBytes() {
 	s.sentBufLock.Lock()
-	s.sentBuf.Reset()
+	buf := make([]byte, len(s.sentBuf.Bytes()))
+	copy(buf, s.sentBuf.Bytes())
 	s.sentBufLock.Unlock()
+	return buf
 }
 
 func (s *TCPRandServer) Close() error {
@@ -86,9 +86,11 @@ func (s *TCPRandServer) handleConn(conn net.Conn) {
 
 		rand.Read(buf[:packetLen])
 
-		s.sentBufLock.Lock()
-		s.sentBuf.Write(buf[:packetLen])
-		s.sentBufLock.Unlock()
+		if s.saveBytes {
+			s.sentBufLock.Lock()
+			s.sentBuf.Write(buf[:packetLen])
+			s.sentBufLock.Unlock()
+		}
 
 		n, err := conn.Write(buf[:packetLen])
 		if n != packetLen {

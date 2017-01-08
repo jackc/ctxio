@@ -153,6 +153,7 @@ func TestGoroutineReaderTCP(t *testing.T) {
 		randIntRange{min: 1, max: 100},
 		randIntRange{min: 1, max: 500},
 		randIntRange{min: 0, max: 10},
+		true,
 	)
 	go tcpRandServer.AcceptOnce()
 	defer tcpRandServer.Close()
@@ -188,6 +189,7 @@ func TestDeadlineReaderTCP(t *testing.T) {
 		randIntRange{min: 1, max: 100},
 		randIntRange{min: 1, max: 500},
 		randIntRange{min: 0, max: 10},
+		true,
 	)
 	go tcpRandServer.AcceptOnce()
 	defer tcpRandServer.Close()
@@ -211,6 +213,35 @@ func TestDeadlineReaderTCP(t *testing.T) {
 		} else {
 			t.Fatal(err)
 		}
+	}
+
+	if bytes.Compare(tcpRandServer.SentBytes(), dest.Bytes()) != 0 {
+		t.Fatalf("source and dest bytes did not match: %v, %v", tcpRandServer.SentBytes(), dest.Bytes())
+	}
+}
+
+func TestDeadlineReaderUncancelableTCP(t *testing.T) {
+	tcpRandServer := NewTCPRandServer(
+		randIntRange{min: 1, max: 100},
+		randIntRange{min: 1, max: 500},
+		randIntRange{min: 0, max: 10},
+		true,
+	)
+	go tcpRandServer.AcceptOnce()
+	defer tcpRandServer.Close()
+
+	conn, err := net.Dial("tcp", tcpRandServer.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ir := ctxio.NewDeadlineReader(conn)
+	dest := &bytes.Buffer{}
+
+	r := ctxio.WithContext(context.Background(), ir)
+	_, err = dest.ReadFrom(r)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	if bytes.Compare(tcpRandServer.SentBytes(), dest.Bytes()) != 0 {
