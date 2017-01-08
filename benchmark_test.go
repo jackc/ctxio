@@ -143,5 +143,7 @@ func BenchmarkNormalReaderTCPSource(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+
+		tcpRandServer.ReleaseSentBytes()
 	}
 }
