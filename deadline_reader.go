@@ -16,41 +16,41 @@ func NewDeadlineReader(r net.Conn) *DeadlineReader {
 }
 
 func (dr *DeadlineReader) ReadContext(ctx context.Context, p []byte) (n int, err error) {
-	var readDoneChan chan struct{}
-	var readDeadlineSet chan bool
-
 	// Avoid cancelation setup if cancelation is impossible
-	if ctx.Done() != nil {
-		// Check if ctx is already canceled
+	if ctx.Done() == nil {
+		return dr.r.Read(p)
+	}
+	return dr.readContext(ctx, p)
+}
+
+func (dr *DeadlineReader) readContext(ctx context.Context, p []byte) (n int, err error) {
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	default:
+	}
+
+	readDoneChan := make(chan struct{})
+	readDeadlineSet := make(chan bool)
+
+	go func() {
 		select {
 		case <-ctx.Done():
-			return 0, ctx.Err()
-		default:
+			dr.r.SetReadDeadline(time.Now())
+			readDeadlineSet <- true
+		case <-readDoneChan:
+			readDeadlineSet <- false
 		}
-
-		readDoneChan = make(chan struct{})
-		readDeadlineSet = make(chan bool)
-
-		go func() {
-			select {
-			case <-ctx.Done():
-				dr.r.SetReadDeadline(time.Now())
-				readDeadlineSet <- true
-			case <-readDoneChan:
-				readDeadlineSet <- false
-			}
-		}()
-	}
+	}()
 
 	n, err = dr.r.Read(p)
 
-	// Cleanup cancelation goroutine and possible read deadline
-	if readDoneChan != nil {
-		close(readDoneChan)
+	// Cleanup cancelation goroutine
+	close(readDoneChan)
 
-		if <-readDeadlineSet {
-			dr.r.SetReadDeadline(time.Time{})
-		}
+	// Clear read deadline if set
+	if <-readDeadlineSet {
+		dr.r.SetReadDeadline(time.Time{})
 	}
 
 	// If the Read completed without error then return success even if ctx has
