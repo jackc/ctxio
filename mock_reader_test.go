@@ -27,7 +27,7 @@ func (mr *MockReader) Read(p []byte) (n int, err error) {
 		if len(resp.buf) > len(p) {
 			panic("mocked larger response than Read request can handle")
 		}
-		copy(resp.buf, p)
+		copy(p, resp.buf)
 
 		if resp.delay > 0 {
 			time.Sleep(resp.delay)

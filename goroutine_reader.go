@@ -5,6 +5,8 @@ import (
 	"io"
 )
 
+const maxGoroutineReaderBufSize = 4096
+
 type GoroutineReader struct {
 	r io.Reader
 
@@ -30,13 +32,18 @@ func (gr *GoroutineReader) ReadContext(ctx context.Context, p []byte) (n int, er
 	// If send is successful to busyChan then no read was already in progress
 	case gr.busyChan <- struct{}{}:
 		// If a previous read was completed after the context was canceled
-		if gr.buf != nil {
+		if len(gr.buf) > 0 {
+			<-gr.busyChan // release busyChan
 			return gr.moveReadResult(p)
 		}
 
 		// Start a new read
 		go func() {
-			gr.buf = make([]byte, len(p))
+			if len(p) <= cap(gr.buf) {
+				gr.buf = gr.buf[:len(p)]
+			} else {
+				gr.buf = make([]byte, len(p))
+			}
 			var n int
 			n, gr.err = gr.r.Read(gr.buf)
 			gr.buf = gr.buf[:n]
@@ -50,7 +57,7 @@ func (gr *GoroutineReader) ReadContext(ctx context.Context, p []byte) (n int, er
 	// read has completed
 	case gr.busyChan <- struct{}{}:
 		n, err = gr.moveReadResult(p)
-		<-gr.busyChan // clear busyChan
+		<-gr.busyChan // release busyChan
 		return n, err
 	case <-ctx.Done():
 		return 0, ctx.Err()
@@ -58,9 +65,11 @@ func (gr *GoroutineReader) ReadContext(ctx context.Context, p []byte) (n int, er
 }
 
 func (gr *GoroutineReader) moveReadResult(p []byte) (n int, err error) {
-	n = copy(gr.buf, p)
+	n = copy(p, gr.buf)
 	if len(gr.buf) > n {
 		gr.buf = gr.buf[:n]
+	} else if cap(gr.buf) <= maxGoroutineReaderBufSize {
+		gr.buf = gr.buf[0:0]
 	} else {
 		gr.buf = nil
 	}
